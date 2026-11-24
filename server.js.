@@ -1,1 +1,131 @@
 
+
+const express = require("express");
+const signalR = require("@microsoft/signalr");
+
+const app = express();
+const PORT = process.env.PORT || 10000;
+
+const HUB_URL = "https://biquote.io/hubs/tick";
+const SYMBOLS = ["EURUSD", "XAUUSD", "BTCUSD"];
+
+const latestTicks = {};
+let connected = false;
+let lastMessageAt = null;
+
+app.use(express.json());
+
+const connection = new signalR.HubConnectionBuilder()
+  .withUrl(HUB_URL)
+  .withAutomaticReconnect()
+  .configureLogging(signalR.LogLevel.Warning)
+  .build();
+
+// Réception des cotations en direct
+connection.on("ReceiveTick", (tick) => {
+  if (!tick || !tick.symbol) return;
+
+  latestTicks[tick.symbol] = {
+    ...tick,
+    receivedAt: new Date().toISOString()
+  };
+
+  lastMessageAt = new Date().toISOString();
+
+  console.log(
+    `[LIVE] ${tick.symbol} | Bid: ${tick.bid} | Ask: ${tick.ask}`
+  );
+});
+
+// Abonnement aux marchés
+async function subscribeMarkets() {
+  await connection.invoke("Subscribe", SYMBOLS);
+  console.log("Abonnements actifs :", SYMBOLS.join(", "));
+}
+
+// Connexion initiale
+async function startConnection() {
+  while (true) {
+    try {
+      await connection.start();
+      connected = true;
+
+      console.log("Connexion BiQuote établie !");
+      await subscribeMarkets();
+
+      // Récupération du dernier prix disponible
+      for (const symbol of SYMBOLS) {
+        try {
+          const tick = await connection.invoke(
+            "GetLatestTick",
+            symbol
+          );
+
+          if (tick && tick.symbol) {
+            latestTicks[symbol] = {
+              ...tick,
+              receivedAt: new Date().toISOString()
+            };
+          }
+        } catch (error) {
+          console.log("Snapshot indisponible :", symbol);
+        }
+      }
+
+      break;
+    } catch (error) {
+      connected = false;
+      console.error("Connexion impossible :", error.message);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+    }
+  }
+}
+
+// Reconnexion automatique
+connection.onreconnected(async () => {
+  connected = true;
+  console.log("Reconnexion BiQuote réussie.");
+
+  try {
+    await subscribeMarkets();
+  } catch (error) {
+    console.error("Erreur abonnement :", error.message);
+  }
+});
+
+connection.onclose(() => {
+  connected = false;
+  console.log("Flux BiQuote interrompu.");
+});
+
+// État du moteur
+app.get("/api/status", (req, res) => {
+  res.json({
+    app: "GPT TRADE BOT",
+    version: "1.0.0",
+    provider: "BiQuote",
+    mode: "LIVE - READ ONLY",
+    connected,
+    symbols: SYMBOLS,
+    lastMessageAt,
+    ticksReceived: Object.keys(latestTicks).length
+  });
+});
+
+// Dernières cotations reçues
+app.get("/api/ticks", (req, res) => {
+  res.json({
+    connected,
+    ticks: latestTicks
+  });
+});
+
+// Vérification Render
+app.get("/", (req, res) => {
+  res.send("GPT TRADE BOT - Server running");
+});
+
+app.listen(PORT, () => {
+  console.log(`Serveur lancé sur le port ${PORT}`);
+  startConnection();
+});
