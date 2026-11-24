@@ -1,1 +1,15 @@
 
+
+{
+  "name": "gpt-trade-bot",
+  "version": "1.0.0",
+  "description": "Bot d'analyse Forex en temps réel via BiQuote",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@microsoft/signalr": "^8.0.7",
+    "express": "^4.21.2"
+  }
+}
